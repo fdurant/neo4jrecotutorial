@@ -137,6 +137,69 @@ def show_indices_on_groups_and_topics():
     for record in result:
         print >> sys.stderr, record    
 
+def show_most_popular_topics():
+    
+    cypher = 'MATCH (t:Topic)<-[:HAS_TOPIC]-()'
+    cypher += ' RETURN t.name, COUNT(*) AS count'
+    cypher += ' ORDER BY count DESC'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_most_recently_created_group():
+    
+    cypher = 'MATCH (g:Group)'
+    cypher += ' RETURN g'
+    cypher += ' ORDER BY g.created DESC'
+    cypher += ' LIMIT 1'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_groups_running_for_more_than_4_years():
+
+    cypher = 'MATCH (g:Group)'
+    cypher += ' WHERE (timestamp() - g.created) / 1000 / 3600 / 24 / 365 >= 4'
+    cypher += ' RETURN count(g)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_groups_with_neo4j_or_data_in_their_name():
+    
+    cypher = 'MATCH (g:Group)'
+    cypher += " WHERE g.name CONTAINS 'Neo4j' OR g.name CONTAINS 'Data'"
+    cypher += ' RETURN g'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_distinct_topics_for_these_groups():
+    
+    cypher = 'MATCH (g:Group)-[:HAS_TOPIC]->(t:Topic)'
+    cypher += " WHERE g.name CONTAINS 'Neo4j' OR g.name CONTAINS 'Data'"
+    cypher += ' RETURN t.name, count(*)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -167,3 +230,10 @@ if __name__ == "__main__":
     show_groups_and_topics()
     create_indexes_on_groups_and_topics()
     show_indices_on_groups_and_topics()
+    
+    # Exercises
+    show_most_popular_topics()
+    show_most_recently_created_group()
+    show_groups_running_for_more_than_4_years()
+    find_groups_with_neo4j_or_data_in_their_name()
+    show_distinct_topics_for_these_groups()
