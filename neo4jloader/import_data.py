@@ -6,6 +6,10 @@ import os
 
 global session
 
+neo4j_uid, neo4j_pwd = os.environ['NEO4J_AUTH'].split('/')
+#print >> sys.stderr, "neo4j_uid = ", neo4j_uid
+#print >> sys.stderr, "neo4j_pwd = ", neo4j_pwd
+
 def initialize():
 
     global session
@@ -13,9 +17,9 @@ def initialize():
 
     secondsToSleep = 10
 
-    for i in range(5,0,-1):
+    for i in range(8,0,-1):
         try:
-            driver = GraphDatabase.driver("bolt://neo4j:7687", auth=basic_auth(os.environ['NEO4J_AUTH'].split('/')[0], "12345"))
+            driver = GraphDatabase.driver("bolt://neo4j:7687", auth=basic_auth(neo4j_uid, neo4j_pwd))
             session = driver.session()
         except (ServiceUnavailable, ClientError, AuthError, SecurityError) as e:
             if i == 1:
@@ -249,6 +253,155 @@ def import_members():
     for record in result:
         print >> sys.stderr, record
 
+def show_members():
+
+    result = session.run("MATCH (member:Member)-[membership:MEMBER_OF]->(group) RETURN member, group, membership LIMIT 10")
+
+    for record in result:
+        print >> sys.stderr, record
+
+def create_index_on_members():
+
+    cypher = 'CREATE INDEX ON :Member(name)'
+    print >> sys.stderr, "CYPHER = ", cypher
+
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_some_member():
+
+    cypher = 'MATCH (m:Member)'
+    cypher += " WHERE m.name = 'Pieter Cailliau'"
+    cypher += ' RETURN m'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
+
+def find_member_of_how_many_groups():
+    
+    cypher = 'MATCH (m:Member)-[:MEMBER_OF]->(group)'
+    cypher += " WHERE m.name = 'Pieter Cailliau'"
+    cypher += ' RETURN group'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_topics_of_these_groups():
+
+    cypher = 'MATCH (m:Member)-[:MEMBER_OF]->(group), (group)-[:HAS_TOPIC]->(topic)'
+    cypher += " WHERE m.name = 'Pieter Cailliau'"
+    cypher += ' RETURN group, topic'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
+
+def find_topics_that_show_up_most():
+
+    cypher = 'MATCH (m:Member)-[:MEMBER_OF]->(group), (group)-[:HAS_TOPIC]->(topic)'
+    cypher += " WHERE m.name = 'Pieter Cailliau'"
+    cypher += ' RETURN topic.name, COUNT(*) AS times'
+    cypher += ' ORDER BY times DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def exclude_groups_im_a_member_of():
+
+    cypher = "MATCH (member:Member) WHERE member.name = 'Pieter Cailliau'"
+    cypher += ' MATCH (group:Group)'
+    cypher += " WHERE group.name CONTAINS 'Neo4j' OR group.name CONTAINS 'Neo4j'"
+    cypher += ' MATCH (group)-[:HAS_TOPIC]->(topic)<-[:HAS_TOPIC]-(otherGroup:Group)'
+    cypher += ' WHERE NOT EXISTS( (member)-[:MEMBER_OF]->(otherGroup) )'
+    cypher += ' RETURN otherGroup.name,'
+    cypher += '        COUNT(topic) AS topicsInCommon,'
+    cypher += '        COLLECT(topic.name) AS topics'
+    cypher += ' ORDER BY topicsInCommon DESC'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_my_similar_groups():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (member)-[:MEMBER_OF]->()-[:HAS_TOPIC]->()<-[:HAS_TOPIC]-(otherGroup:Group)'
+    cypher += ' WHERE NOT EXISTS ((member)-[:MEMBER_OF]->(otherGroup))'
+    cypher += ' RETURN otherGroup.name,'
+    cypher += '        COUNT(*) AS topicsInCommon'
+    cypher += ' ORDER BY topicsInCommon DESC'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
+
+def who_are_members_of_the_most_groups():
+
+    cypher = 'MATCH (member:Member)-[:MEMBER_OF]->()'
+    cypher += ' WITH member, COUNT(*) AS groups'
+    cypher += ' ORDER BY groups DESC'
+    cypher += ' LIMIT 10'
+    cypher += ' RETURN member.name, groups'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def create_interested_in_relationship():
+
+    cypher = 'USING PERIODIC COMMIT 50000'
+    cypher += ' LOAD CSV WITH HEADERS FROM "file:///members.csv" AS row'
+    cypher += ' WITH split(row.topics, ";") AS topics, row.id AS memberId'
+    cypher += ' UNWIND topics AS topicId'
+    cypher += ' WITH DISTINCT memberId, topicId'
+    cypher += ' MATCH (member:Member {id: memberId})'
+    cypher += ' MATCH (topic:Topic {id: topicId})'
+    cypher += ' MERGE (member)-[:INTERESTED_IN]->(topic)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_my_similar_groups():
+
+    cypher = "MATCH (member:Member {name: 'Will Lyon'})-[:INTERESTED_IN]->(topic),"
+    cypher += ' (member)-[:MEMBER_OF]->(group)-[:HAS_TOPIC]->(topic)'
+    cypher += ' WITH member, topic, COUNT(*) AS score'
+    cypher += ' MATCH (topic)<-[:HAS_TOPIC]-(otherGroup)'
+    cypher += ' WHERE NOT (member)-[:MEMBER_OF]->(otherGroup)'
+    cypher += ' RETURN otherGroup.name, COLLECT(topic.name), SUM(score) as score'
+    cypher += ' ORDER BY score DESC'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -265,12 +418,12 @@ def template():
     for record in result:
         print >> sys.stderr, record
 
-
 if __name__ == "__main__":
     initialize()
 
-    # The Meetup dataset
     empty_db()
+
+    # 1) Recommend groups by topic
     import_groups()
     show_groups()
     merge_and_constraints()
@@ -291,7 +444,23 @@ if __name__ == "__main__":
 
     find_similar_groups_to_neo4j()
     
-    # Members
+    # 2) Groups similar to mine
     explore_members()
     add_constraint_on_members()
     import_members()
+    show_members()
+    create_index_on_members()
+
+    # Exercises
+    find_some_member()
+    find_member_of_how_many_groups()
+    find_topics_of_these_groups()
+    find_topics_that_show_up_most()
+
+    exclude_groups_im_a_member_of()
+    find_my_similar_groups()
+    who_are_members_of_the_most_groups()
+    
+    # Member interests (topics)
+    create_interested_in_relationship()
+    find_my_similar_groups()
