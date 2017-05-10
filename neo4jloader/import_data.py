@@ -402,6 +402,168 @@ def find_my_similar_groups():
     for record in result:
         print >> sys.stderr, record
 
+def create_constraints_and_indexes_on_events():
+    
+    cypher = 'CREATE CONSTRAINT ON (e:Event) ASSERT e.id IS UNIQUE'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+    cypher = 'CREATE INDEX ON :Event(time)'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
+
+def import_events():
+
+    cypher = 'USING PERIODIC COMMIT 10000'
+    cypher += ' LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
+    cypher += ' MERGE (event:Event {id: row.id})'
+    cypher += ' ON CREATE SET event.name = row.name,'
+    cypher += '               event.time = toInt(row.time),'
+    cypher += '               event.utcOffset = toInt(row.utc_offset)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_events():
+
+    cypher = 'MATCH (event:Event)'
+    cypher += ' RETURN event'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def connect_events_and_groups():
+
+    cypher = 'LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
+    cypher += ' WITH distinct row.group_id as groupId, row.id as eventId'
+    cypher += ' MATCH (group:Group {id: groupId})'
+    cypher += ' MATCH (event:Event {id: eventId})'
+    cypher += ' MERGE (group)-[:HOSTED_EVENT]->(event)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_groups_and_events():
+
+    cypher = 'MATCH (group:Group)-[hosted:HOSTED_EVENT]->(event)'
+    cypher += ' WHERE group.name STARTS WITH "NYC Neo4j" AND event.time < timestamp()'
+    cypher += ' RETURN event, group, hosted'
+    cypher += ' ORDER BY event.time DESC'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_future_events_in_my_groups():
+
+    cypher = 'MATCH (member:Member)-[:MEMBER_OF]->(group)-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += " WHERE member.name CONTAINS 'Will Lyon' AND futureEvent.time > timestamp()"
+    cypher += ' RETURN group.name,'
+    cypher += '        futureEvent.name,'
+    cypher += '        round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    cypher += ' ORDER BY days'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_future_events_for_my_topics():
+    
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Will Lyon'"
+    cypher += ' MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent) WHERE futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' MATCH (futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, commonTopics, myGroup'
+    cypher += ' ORDER BY futureEvent.time'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def filter_out_events_which_have_less_than_3_common_topics():
+    
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event) WHERE futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' MATCH (futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, commonTopics, myGroup'
+    cypher += ' ORDER BY futureEvent.time'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def only_show_events_happening_in_the_next_7_days():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    # Here's the timestamp
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' MATCH (futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, commonTopics, myGroup'
+    # And here we order by it
+    cypher += ' ORDER BY futureEvent.time'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def sorting_the_events_by_some_importance_score():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Will Lyon'"
+    cypher += ' MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' MATCH (futureEvent)<-[:HOSTED_EVENT]-(group)'
+    # define myGroupScore
+    cypher += ' WITH futureEvent, group, commonTopics, myGroup, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, commonTopics, myGroup, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    # and integrate with other score elements
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, commonTopics, myGroup, days, myGroupScore + commonTopics - days AS score'
+    cypher += ' ORDER BY score DESC'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -461,6 +623,23 @@ if __name__ == "__main__":
     find_my_similar_groups()
     who_are_members_of_the_most_groups()
     
-    # Member interests (topics)
+    # 3) My interests
     create_interested_in_relationship()
     find_my_similar_groups()
+
+    # 4) Event recommendations
+    create_constraints_and_indexes_on_events()
+    import_events()
+    show_events()
+    connect_events_and_groups()
+    show_groups_and_events()
+    find_future_events_in_my_groups()
+
+    # Layered recommendations
+    find_future_events_for_my_topics()
+    
+    # Exercise:
+    filter_out_events_which_have_less_than_3_common_topics()
+    only_show_events_happening_in_the_next_7_days()
+    
+    sorting_the_events_by_some_importance_score()
