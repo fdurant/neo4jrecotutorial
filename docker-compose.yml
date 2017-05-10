@@ -1,18 +1,10 @@
 version: '2'
 services:
-  nginx-proxy:
-    image: jwilder/nginx-proxy:0.6.0
-    container_name: nginx-proxy
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-    labels:
-      - "description=Frederik's nginx reverse proxy server"
-
   neo4j:
     build:
       context: .
       dockerfile: neo4j/Dockerfile
-    container_name: official_neo4j_plus_apoc
+    container_name: tutorial_neo4j_plus_apoc
     env_file:
       - .env
     environment:
@@ -34,6 +26,6 @@ services:
       dockerfile: neo4jloader/Dockerfile
     env_file:
       - .env
-    container_name: neo4jloader
+    container_name: tutorial_neo4jloader
     links:
       - neo4j
