@@ -42,6 +42,7 @@ def import_groups():
     cypher += ' FROM "file:///groups.csv"'
     cypher += " AS row"
     cypher += " CREATE (:Group { id:row.id, name:row.name, urlname:row.urlname, rating:toInt(row.rating), created:toInt(row.created) })"
+    print >> sys.stderr, "CYPHER = ", cypher
     result = session.run(cypher)
     for record in result:
         print >> sys.stderr, record
@@ -67,6 +68,25 @@ def merge_and_constraints():
     for record in result:
         print >> sys.stderr, record
 
+def import_topics():
+
+    cypher = "LOAD CSV WITH HEADERS"
+    cypher += ' FROM "file:///groups_topics.csv"'
+    cypher += ' AS row'
+    cypher += ' MERGE (topic:Topic {id: row.id})'
+    cypher += ' ON CREATE SET topic.name = row.name, topic.urlkey = row.urlkey'
+
+    result = session.run(cypher)
+    for record in result:
+        print >> sys.stderr, record
+
+def show_topics():
+
+    result = session.run("MATCH (t:Topic) RETURN t.id, t.name LIMIT 10")
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -77,6 +97,7 @@ def template():
     cypher += ' '
     cypher += ' '
 
+    print >> sys.stderr, "CYPHER = ", cypher
     result = session.run(cypher)
 
     for record in result:
@@ -89,3 +110,5 @@ if __name__ == "__main__":
     import_groups()
     show_groups()
     merge_and_constraints()
+    import_topics()
+    show_topics()
