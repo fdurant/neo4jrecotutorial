@@ -68,6 +68,14 @@ def merge_and_constraints():
     for record in result:
         print >> sys.stderr, record
 
+def show_constraints():
+    
+    cypher = 'CALL db.constraints()'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
+
 def import_topics():
 
     cypher = "LOAD CSV WITH HEADERS"
@@ -86,6 +94,48 @@ def show_topics():
 
     for record in result:
         print >> sys.stderr, record
+
+def connect_groups_and_topics():
+    
+    cypher = 'LOAD CSV WITH HEADERS FROM "file:///groups_topics.csv"  AS row'
+    cypher += ' MATCH (topic:Topic {id: row.id})'
+    cypher += ' MATCH (group:Group {id: row.groupId})'
+    cypher += ' MERGE (group)-[:HAS_TOPIC]->(topic)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_groups_and_topics():
+
+    result = session.run("MATCH (group:Group)-[:HAS_TOPIC]->(topic:Topic) RETURN group, topic LIMIT 10")
+
+    for record in result:
+        print >> sys.stderr, record
+
+def create_indexes_on_groups_and_topics():
+    
+    cypher = 'CREATE INDEX ON :Group(name)'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+    cypher = 'CREATE INDEX ON :Topic(name)'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def show_indices_on_groups_and_topics():
+    
+    cypher = 'CALL db.indexes()'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
 
 def template():
     
@@ -110,5 +160,10 @@ if __name__ == "__main__":
     import_groups()
     show_groups()
     merge_and_constraints()
+    show_constraints()
     import_topics()
     show_topics()
+    connect_groups_and_topics()
+    show_groups_and_topics()
+    create_indexes_on_groups_and_topics()
+    show_indices_on_groups_and_topics()
