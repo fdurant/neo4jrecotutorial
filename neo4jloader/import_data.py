@@ -36,7 +36,7 @@ def empty_db():
     except:
         print >> sys.stderr, "Neo4J database is already empty, so no need to empty it again"
 
-def load_groups():
+def import_groups():
 
     cypher = "LOAD CSV WITH HEADERS"
     cypher += ' FROM "file:///groups.csv"'
@@ -53,8 +53,39 @@ def show_groups():
     for record in result:
         print >> sys.stderr, record
 
+def merge_and_constraints():
+    
+    cypher = 'CREATE CONSTRAINT ON (t:Topic) ASSERT t.id IS UNIQUE;'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+    cypher = ' CREATE CONSTRAINT ON (g:Group) ASSERT g.id IS UNIQUE;'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def template():
+    
+    cypher = ''
+    cypher += ' '
+    cypher += ' '
+    cypher += ' '
+    cypher += ' '
+    cypher += ' '
+    cypher += ' '
+
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+
 if __name__ == "__main__":
     initialize()
     empty_db()
-    load_groups()
+    import_groups()
     show_groups()
+    merge_and_constraints()
