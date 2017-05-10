@@ -9,8 +9,9 @@ services:
       - .env
     environment:
       - dbms.memory.heap.initial_size=2048
-      - NEO4J_HEAP_MEMORY=2048
+      - NEO4J_HEAP_MEMORY=7000
       - NEO4J_CACHE_MEMORY=1G
+      - NEO4J_dbms_memory_heap_maxSize=4096
     cap_add:
       - SYS_RESOURCE
     ports:

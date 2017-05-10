@@ -200,6 +200,55 @@ def show_distinct_topics_for_these_groups():
     for record in result:
         print >> sys.stderr, record
 
+def find_similar_groups_to_neo4j():
+
+    cypher = 'MATCH (group:Group)'
+    cypher += " WHERE (group.name CONTAINS 'Graph Database' OR group.name CONTAINS 'Neo4j')"
+    cypher += ' MATCH (group)-[:HAS_TOPIC]->(topic)<-[:HAS_TOPIC]-(otherGroup)'
+    cypher += ' RETURN otherGroup.name, COUNT(topic) AS topicsInCommon, COLLECT(topic.name) AS topics'
+    cypher += ' ORDER BY topicsInCommon DESC, otherGroup.name'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record    
+
+def explore_members():
+
+    cypher = 'LOAD CSV WITH HEADERS'
+    cypher += ' FROM "file:///members.csv" AS row'
+    cypher += ' RETURN row'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+    for record in result:
+        print >> sys.stderr, record
+
+def add_constraint_on_members():
+
+    cypher = 'CREATE CONSTRAINT ON (m:Member) ASSERT m.id IS UNIQUE'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def import_members():
+
+    cypher = 'USING PERIODIC COMMIT 10000'
+    cypher += ' LOAD CSV WITH HEADERS'
+    cypher += ' FROM "file:///members.csv" AS row'
+    cypher += ' WITH DISTINCT row.id AS id, row.name AS name'
+    cypher += ' MERGE (member:Member {id: id})'
+    cypher += ' ON CREATE SET member.name = name'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -219,6 +268,8 @@ def template():
 
 if __name__ == "__main__":
     initialize()
+
+    # The Meetup dataset
     empty_db()
     import_groups()
     show_groups()
@@ -237,3 +288,10 @@ if __name__ == "__main__":
     show_groups_running_for_more_than_4_years()
     find_groups_with_neo4j_or_data_in_their_name()
     show_distinct_topics_for_these_groups()
+
+    find_similar_groups_to_neo4j()
+    
+    # Members
+    explore_members()
+    add_constraint_on_members()
+    import_members()
