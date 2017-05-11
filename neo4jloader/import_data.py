@@ -6,6 +6,9 @@ import os
 
 global session
 
+dataImportOnly = True if os.environ['DATA_IMPORT_ONLY'] == '1' else False
+print >> sys.stderr, "dataImportOnly = ", dataImportOnly
+
 neo4j_uid, neo4j_pwd = os.environ['NEO4J_AUTH'].split('/')
 #print >> sys.stderr, "neo4j_uid = ", neo4j_uid
 #print >> sys.stderr, "neo4j_pwd = ", neo4j_pwd
@@ -564,6 +567,118 @@ def sorting_the_events_by_some_importance_score():
     for record in result:
         print >> sys.stderr, record
 
+def create_constraint_on_venues():
+
+
+    cypher = 'CREATE CONSTRAINT ON (v:Venue)'
+    cypher += ' ASSERT v.id IS UNIQUE'
+
+    result = session.run(cypher)
+    for record in result:
+        print >> sys.stderr, record
+
+def import_venues():
+
+    cypher = 'LOAD CSV WITH HEADERS FROM "file:///venues.csv" AS row'
+    cypher += ' MERGE (venue:Venue {id: row.id})'
+    cypher += ' ON CREATE SET venue.name = row.name,'
+    cypher += ' venue.latitude = tofloat(row.lat),'
+    cypher += ' venue.longitude = tofloat(row.lon),'
+    cypher += ' venue.address = row.address_1'
+
+    result = session.run(cypher)
+    for record in result:
+        print >> sys.stderr, record
+
+def connect_events_to_venues():
+
+    cypher = 'LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
+    cypher += ' MATCH (venue:Venue {id: row.venue_id})'
+    cypher += ' MATCH (event:Event {id: row.id})'
+    cypher += ' MERGE (event)-[:VENUE]->(venue)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def verify_venues_import():
+
+    cypher = 'MATCH (venue:Venue)'
+    cypher += ' WHERE EXISTS(venue.latitude) AND EXISTS(venue.longitude)'
+    cypher += ' RETURN COUNT(*)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def find_venues_near_here():
+    
+    # 'here' means the Skills Matter / CodeNode hacker space in London
+    cypher = 'WITH point({latitude: 40.7577898, longitude: -73.9853772}) AS trainingVenue'
+    cypher += ' MATCH (venue:Venue)'
+    cypher += ' WITH venue, distance(point(venue), trainingVenue) AS distance'
+    cypher += ' RETURN venue.id, venue.name, venue.address, distance'
+    cypher += ' ORDER BY distance'
+    cypher += ' LIMIT 10'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def update_recommender_to_also_return_distance_to_venue():
+    
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+    # Introduce distance
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance(point(venue), point({latitude: 51.518698, longitude: -0.086146})) AS distance'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    # Include distance in returned values
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, days, distance , myGroupScore + commonTopics - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def filter_out_events_further_than_1km():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' WITH  futureEvent, group, venue,commonTopics, myGroup, distance(point(venue), point({latitude: 51.518698, longitude: -0.086146})) AS distance'
+    # Limit distance
+    cypher += ' WHERE distance < 1000'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, days, distance, myGroupScore + commonTopics - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -587,59 +702,88 @@ if __name__ == "__main__":
 
     # 1) Recommend groups by topic
     import_groups()
-    show_groups()
+    if not dataImportOnly:
+        show_groups()
     merge_and_constraints()
-    show_constraints()
+    if not dataImportOnly:
+        show_constraints()
     import_topics()
-    show_topics()
+    if not dataImportOnly:
+        show_topics()
     connect_groups_and_topics()
-    show_groups_and_topics()
+    if not dataImportOnly:
+        show_groups_and_topics()
     create_indexes_on_groups_and_topics()
     show_indices_on_groups_and_topics()
     
     # Exercises
-    show_most_popular_topics()
-    show_most_recently_created_group()
-    show_groups_running_for_more_than_4_years()
-    find_groups_with_neo4j_or_data_in_their_name()
-    show_distinct_topics_for_these_groups()
+    if not dataImportOnly:
+        show_most_popular_topics()
+        show_most_recently_created_group()
+        show_groups_running_for_more_than_4_years()
+        find_groups_with_neo4j_or_data_in_their_name()
+        show_distinct_topics_for_these_groups()
 
-    find_similar_groups_to_neo4j()
+    if not dataImportOnly:
+        find_similar_groups_to_neo4j()
     
     # 2) Groups similar to mine
-    explore_members()
+    if not dataImportOnly:
+        explore_members()
     add_constraint_on_members()
     import_members()
-    show_members()
+    if not dataImportOnly:
+        show_members()
     create_index_on_members()
 
     # Exercises
-    find_some_member()
-    find_member_of_how_many_groups()
-    find_topics_of_these_groups()
-    find_topics_that_show_up_most()
+    if not dataImportOnly:
+        find_some_member()
+        find_member_of_how_many_groups()
+        find_topics_of_these_groups()
+        find_topics_that_show_up_most()
 
-    exclude_groups_im_a_member_of()
-    find_my_similar_groups()
-    who_are_members_of_the_most_groups()
+    if not dataImportOnly:
+        exclude_groups_im_a_member_of()
+        find_my_similar_groups()
+        who_are_members_of_the_most_groups()
     
     # 3) My interests
     create_interested_in_relationship()
-    find_my_similar_groups()
+    if not dataImportOnly:
+        find_my_similar_groups()
 
     # 4) Event recommendations
     create_constraints_and_indexes_on_events()
     import_events()
-    show_events()
+    if not dataImportOnly:
+        show_events()
     connect_events_and_groups()
-    show_groups_and_events()
-    find_future_events_in_my_groups()
+    if not dataImportOnly:
+        show_groups_and_events()
+        find_future_events_in_my_groups()
 
     # Layered recommendations
-    find_future_events_for_my_topics()
+    if not dataImportOnly:
+        find_future_events_for_my_topics()
     
     # Exercise:
-    filter_out_events_which_have_less_than_3_common_topics()
-    only_show_events_happening_in_the_next_7_days()
+    if not dataImportOnly:
+        filter_out_events_which_have_less_than_3_common_topics()
+        only_show_events_happening_in_the_next_7_days()
     
-    sorting_the_events_by_some_importance_score()
+    if not dataImportOnly:
+        sorting_the_events_by_some_importance_score()
+
+    # 5) Venues
+    create_constraint_on_venues()
+    import_venues()
+    connect_events_to_venues()
+    if not dataImportOnly:
+        verify_venues_import()
+        find_venues_near_here()
+
+    # Exercises
+    if not dataImportOnly:
+        update_recommender_to_also_return_distance_to_venue()
+        filter_out_events_further_than_1km()
