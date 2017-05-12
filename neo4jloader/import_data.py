@@ -20,7 +20,7 @@ def initialize():
 
     secondsToSleep = 10
 
-    for i in range(8,0,-1):
+    for i in range(15,0,-1):
         try:
             driver = GraphDatabase.driver("bolt://neo4j:7687", auth=basic_auth(neo4j_uid, neo4j_pwd))
             session = driver.session()
@@ -373,7 +373,7 @@ def who_are_members_of_the_most_groups():
 
 def create_interested_in_relationship():
 
-    cypher = 'USING PERIODIC COMMIT 50000'
+    cypher = 'USING PERIODIC COMMIT 10000'
     cypher += ' LOAD CSV WITH HEADERS FROM "file:///members.csv" AS row'
     cypher += ' WITH split(row.topics, ";") AS topics, row.id AS memberId'
     cypher += ' UNWIND topics AS topicId'
@@ -421,7 +421,7 @@ def create_constraints_and_indexes_on_events():
 
 def import_events():
 
-    cypher = 'USING PERIODIC COMMIT 10000'
+    cypher = 'USING PERIODIC COMMIT 1000'
     cypher += ' LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
     cypher += ' MERGE (event:Event {id: row.id})'
     cypher += ' ON CREATE SET event.name = row.name,'
@@ -448,7 +448,8 @@ def show_events():
 
 def connect_events_and_groups():
 
-    cypher = 'LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
+    cypher = 'USING PERIODIC COMMIT 1000'
+    cypher += ' LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
     cypher += ' WITH distinct row.group_id as groupId, row.id as eventId'
     cypher += ' MATCH (group:Group {id: groupId})'
     cypher += ' MATCH (event:Event {id: eventId})'
@@ -592,7 +593,8 @@ def import_venues():
 
 def connect_events_to_venues():
 
-    cypher = 'LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
+    cypher = 'USING PERIODIC COMMIT 1000'
+    cypher += ' LOAD CSV WITH HEADERS FROM "file:///events.csv" AS row'
     cypher += ' MATCH (venue:Venue {id: row.venue_id})'
     cypher += ' MATCH (event:Event {id: row.id})'
     cypher += ' MERGE (event)-[:VENUE]->(venue)'
@@ -671,6 +673,115 @@ def filter_out_events_further_than_1km():
     cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
     cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, distance, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
     cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, days, distance, myGroupScore + commonTopics - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def import_rsvps():
+    
+    cypher = 'USING PERIODIC COMMIT 10000'
+    cypher += ' LOAD CSV WITH HEADERS FROM "file:///rsvps.csv" AS row'
+    cypher += ' WITH row WHERE row.response = "yes"'
+    cypher += ' MATCH (member:Member {id: row.member_id})'
+    cypher += ' MATCH (event:Event {id: row.event_id})'
+    cypher += ' MERGE (member)-[rsvp:RSVPD {id: row.rsvp_id}]->(event)'
+    cypher += ' ON CREATE SET rsvp.created = toint(row.created),'
+    cypher += '               rsvp.lastModified = toint(row.mtime),'
+    cypher += '               rsvp.guests = toint(row.guests)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def include_attendance_at_previous_events_to_score():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Will Lyon'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    # Match previous events, if any
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)<-[:HOSTED_EVENT]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WHERE previousEvent.time < timestamp()'
+    # Count attendance (well, RSVPs as a proxy of attendance)
+    cypher += ' WITH futureEvent, commonTopics, myGroup, COUNT(rsvp) AS previousEvents'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance(point(venue), point({latitude: 40.7577898, longitude: -73.9853772})) AS distance'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    # Include this count as a factor in the overall score
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, previousEvents, days, distance, myGroupScore + commonTopics - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def calculate_score_for_events_at_previously_visited_venues():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)<-[:HOSTED_EVENT]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WHERE previousEvent.time < timestamp()'
+    cypher += ' WITH member, futureEvent, commonTopics, myGroup, COUNT(rsvp) AS previousEvents'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' WITH member, futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance(point(venue), point({latitude: 51.518698, longitude: -0.086146})) AS distance'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)-[:VENUE]->(venue)'
+    cypher += ' WHERE previousEvent.time < timestamp()'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, COUNT(previousEvent) AS eventsAtVenue'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, eventsAtVenue, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, eventsAtVenue, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, previousEvents, days, distance, eventsAtVenue, myGroupScore + commonTopics + eventsAtVenue - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def calculate_score_for_events_within_500m_of_previously_visited_venues():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)<-[:HOSTED_EVENT]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WHERE previousEvent.time < timestamp()'
+
+    cypher += ' WITH member, futureEvent, commonTopics, myGroup, COUNT(rsvp) AS previousEvents'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+
+    cypher += ' WITH member, futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance(point(venue), point({latitude: 51.518698, longitude: -0.086146})) AS distance'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)-[:VENUE]->(aVenue)'
+    # less than 500 m from previously visited venue
+    cypher += ' WHERE previousEvent.time < timestamp() AND abs(distance(point(venue), point(aVenue))) < 500'
+
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, COUNT(previousEvent) AS eventsAtVenue'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, eventsAtVenue, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, distance, eventsAtVenue, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, previousEvents, days, distance, eventsAtVenue, myGroupScore + commonTopics + eventsAtVenue - days AS score'
     cypher += ' ORDER BY score DESC'
 
     print >> sys.stderr, "CYPHER = ", cypher
@@ -787,3 +898,12 @@ if __name__ == "__main__":
     if not dataImportOnly:
         update_recommender_to_also_return_distance_to_venue()
         filter_out_events_further_than_1km()
+
+    # 6) RSVPs
+    import_rsvps()
+    include_attendance_at_previous_events_to_score()
+    
+    # Exercises
+    if not dataImportOnly:
+        calculate_score_for_events_at_previously_visited_venues()
+        calculate_score_for_events_within_500m_of_previously_visited_venues()
