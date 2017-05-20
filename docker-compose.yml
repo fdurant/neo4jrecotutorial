@@ -8,16 +8,13 @@ services:
     env_file:
       - config.env
     environment:
-      - dbms.memory.heap.initial_size=2048
-      - NEO4J_HEAP_MEMORY=7000
-      - NEO4J_CACHE_MEMORY=1G
-      - NEO4J_dbms_memory_heap_maxSize=4096
+      - NEO4J_dbms_memory_heap_maxSize=4G
+      - NEO4J_dbms_connectors_default__listen__address=0.0.0.0
     cap_add:
       - SYS_RESOURCE
     ports:
       - "7474:7474"
-    expose:
-      - "7687"
+      - "7687:7687"
     labels:
       - "description=Frederik's Neo4J graph database server, including APOC library"
 

@@ -38,8 +38,9 @@ def empty_db():
         result = session.run('MATCH (n) RETURN (n) LIMIT 1')
         res = result.peek()
         # Something found, so delete all nodes
+        print >> sys.stderr, "Started emptying Neo4J database"
         result = session.run('MATCH (n) DETACH DELETE(n)')
-        print >> sys.stderr, "Emptying Neo4J database"
+        print >> sys.stderr, "Done emptying Neo4J database"
     except:
         print >> sys.stderr, "Neo4J database is already empty, so no need to empty it again"
 
