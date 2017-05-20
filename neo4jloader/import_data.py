@@ -791,6 +791,63 @@ def calculate_score_for_events_within_500m_of_previously_visited_venues():
     for record in result:
         print >> sys.stderr, record
 
+def formatting_timestamps():
+    
+    cypher = 'MATCH (venue)<-[:VENUE]-(event:Event)<-[:HOSTED_EVENT]-(group:Group)'
+    cypher += ' WHERE event.time < timestamp()'
+    cypher += ' WITH event, venue, group'
+    cypher += ' ORDER BY event.time DESC'
+    cypher += ' LIMIT 5'
+    cypher += ' RETURN event.name, group.name, venue.name, apoc.date.format(event.time) AS datetime'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def import_json_from_meetup_api():
+
+    cypher = 'CALL apoc.load.json("https://api.meetup.com/NYCNeo4j/photos?&sign=true&photo-host=public")'
+    cypher += ' YIELD value AS document'
+    cypher += ' WITH document WHERE EXISTS(document.photo_album.event.id)'
+    cypher += ' RETURN document.link AS link,'
+    cypher += ' document.created AS time,'
+    cypher += ' document.id AS photoId,'
+    cypher += ' document.member.id as memberId,'
+    cypher += ' document.photo_album.event.id AS eventId'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def import_photos_meta_data():
+
+    cypher = 'CREATE CONSTRAINT ON (p:Photo) ASSERT p.id IS UNIQUE'
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+    cypher = 'CALL apoc.load.json("https://api.meetup.com/graphdb-london/photos?&sign=true&photo-host=public")'
+    cypher += ' YIELD value AS document'
+    cypher += ' WITH document WHERE document.photo_album.event.id IS NOT NULL'
+    cypher += ' MATCH (event:Event {id: document.photo_album.event.id})'
+    cypher += ' OPTIONAL MATCH (member:Member {id: tostring(document.member.id)})'
+    cypher += ' MERGE (photo:Photo {id: document.id})'
+    cypher += ' ON CREATE SET photo.link = document.link, photo.created = document.created'
+    cypher += ' MERGE (photo)-[:POSTED_IN_EVENT]->(event)'
+    cypher += ' WITH photo, member WHERE  member is NOT NULL'
+    cypher += ' MERGE (member)-[:POSTED_PHOTO]->(photo)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -908,3 +965,10 @@ if __name__ == "__main__":
     if not dataImportOnly:
         calculate_score_for_events_at_previously_visited_venues()
         calculate_score_for_events_within_500m_of_previously_visited_venues()
+
+    # 7) Procedures
+    if not dataImportOnly:
+        formatting_timestamps()
+        import_json_from_meetup_api()
+    import_photos_meta_data()
+    
