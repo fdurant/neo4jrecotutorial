@@ -848,6 +848,108 @@ def import_photos_meta_data():
     for record in result:
         print >> sys.stderr, record
 
+def find_people_that_i_know():
+
+    cypher = 'MATCH (me:Member)-[:RSVPD]->()<-[:RSVPD]-(otherPerson)'
+    cypher += " WHERE me.name CONTAINS 'Will Lyon'"
+    cypher += ' WITH otherPerson, COUNT(*) AS commonEvents'
+    cypher += ' ORDER BY commonEvents DESC'
+    cypher += ' LIMIT 10'
+    cypher += ' RETURN otherPerson.name, commonEvents'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def add_process_label_to_active_members():
+
+    cypher = 'MATCH (m:Member) WHERE size( (m)-[:RSVPD]->() ) >= 7'
+    cypher += ' SET m:Process'
+    cypher += ' RETURN count(*)'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def materialise_the_latent_social_graph():
+
+    cypher = 'call apoc.periodic.commit("'
+    cypher += ' MATCH (m1:Member:Process) WITH m1 LIMIT {limit} REMOVE m1:Process'
+    cypher += ' WITH m1 MATCH (m1)-[:RSVPD]->(event)<-[:RSVPD]-(m2)'
+    cypher += ' WITH m1, m2, COUNT(*) AS times WHERE times >= 5'
+    cypher += ' MERGE (m1)-[:FRIENDS]-(m2) RETURN count(*)'
+    cypher += ' ",{limit:500})'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def add_friends_to_recommendation_engine():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)<-[:HOSTED_EVENT]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WHERE previousEvent.time < timestamp()'
+    cypher += ' WITH member, futureEvent, commonTopics, myGroup, COUNT(rsvp) AS previousEvents'
+    cypher += ' OPTIONAL MATCH (member)-[:FRIENDS]-(:Member)-[rsvpFriend:RSVPD]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, commonTopics, myGroup, previousEvents, COUNT(rsvpFriend) AS friendsGoing'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' WITH member, futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, distance(point(venue), point({latitude: 51.518698, longitude: -0.086146})) AS distance'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)-[:VENUE]->(aVenue)'
+    cypher += ' WHERE previousEvent.time < timestamp() AND abs(distance(point(venue), point(aVenue))) < 500'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, distance, COUNT(previousEvent) AS eventsAtVenue'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, distance, eventsAtVenue, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, distance, eventsAtVenue, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, previousEvents, friendsGoing, days, distance, eventsAtVenue, myGroupScore + commonTopics + eventsAtVenue + (friendsGoing / 2.0) - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
+def who_are_these_friends():
+
+    cypher = "MATCH (member:Member) WHERE member.name CONTAINS 'Mark Needham'"
+    cypher += ' MATCH (futureEvent:Event)'
+    cypher += ' WHERE timestamp() + (7 * 24 * 60 * 60 * 1000) > futureEvent.time > timestamp()'
+    cypher += ' WITH member, futureEvent, EXISTS((member)-[:MEMBER_OF]->()-[:HOSTED_EVENT]->(futureEvent)) AS myGroup'
+    cypher += ' OPTIONAL MATCH (member)-[:INTERESTED_IN]->()<-[:HAS_TOPIC]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, myGroup, COUNT(*) AS commonTopics'
+    cypher += ' WHERE commonTopics >= 3'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)<-[:HOSTED_EVENT]-()-[:HOSTED_EVENT]->(futureEvent)'
+    cypher += ' WHERE previousEvent.time < timestamp()'
+    cypher += ' WITH member, futureEvent, commonTopics, myGroup, COUNT(rsvp) AS previousEvents'
+    cypher += ' OPTIONAL MATCH (member)-[:FRIENDS]-(friend:Member)-[rsvpFriend:RSVPD]->(futureEvent)'
+    cypher += ' WITH member, futureEvent, commonTopics, myGroup, previousEvents, COUNT(rsvpFriend) AS friendsGoing, COLLECT(friend.name) AS friends'
+    cypher += ' MATCH (venue)<-[:VENUE]-(futureEvent)<-[:HOSTED_EVENT]-(group)'
+    cypher += ' WITH member, futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, friends, distance(point(venue), point({latitude: 51.518698, longitude: -0.086146})) AS distance'
+    cypher += ' OPTIONAL MATCH (member)-[rsvp:RSVPD]->(previousEvent)-[:VENUE]->(aVenue)'
+    cypher += ' WHERE previousEvent.time < timestamp() AND abs(distance(point(venue), point(aVenue))) < 500'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, friends, distance, COUNT(previousEvent) AS eventsAtVenue'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, friends, distance, eventsAtVenue, CASE WHEN myGroup THEN 5 ELSE 0 END AS myGroupScore'
+    cypher += ' WITH futureEvent, group, venue, commonTopics, myGroup, previousEvents, friendsGoing, friends, distance, eventsAtVenue, myGroupScore, round((futureEvent.time - timestamp()) / (24.0*60*60*1000)) AS days'
+    cypher += ' RETURN futureEvent.name, futureEvent.time, group.name, venue.name, commonTopics, myGroup, previousEvents, friendsGoing, friends[..5], days, distance, eventsAtVenue, myGroupScore + commonTopics + eventsAtVenue + (friendsGoing / 2.0) - days AS score'
+    cypher += ' ORDER BY score DESC'
+
+    print >> sys.stderr, "CYPHER = ", cypher
+    result = session.run(cypher)
+
+    for record in result:
+        print >> sys.stderr, record
+
 def template():
     
     cypher = ''
@@ -972,3 +1074,17 @@ if __name__ == "__main__":
         import_json_from_meetup_api()
     import_photos_meta_data()
     
+    # 8) Latent social graph
+    if not dataImportOnly:
+        find_people_that_i_know()
+        add_process_label_to_active_members()
+        # Next query takes 15 minutes!
+        materialise_the_latent_social_graph()
+        add_friends_to_recommendation_engine()
+        who_are_these_friends()
+
+    # 9) Scoring (with the PARETO function
+    # => dampen the weight of really high scores
+    # See http://guides.neo4j.com/reco-nyc/file/09_scoring.html
+
+    # More ideas? See http://guides.neo4j.com/reco-nyc/file/10_free_for_all.html
